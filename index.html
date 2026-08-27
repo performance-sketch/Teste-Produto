@@ -212,6 +212,35 @@
     color: #5c7275;
     line-height: 1.5;
   }
+
+  @media (max-width: 860px) {
+    html, body { height: auto; overflow-x: hidden; overflow-y: auto; }
+
+    .app {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto;
+      height: auto;
+      min-height: 100vh;
+    }
+
+    .stage {
+      height: 78vw;
+      max-height: 60vh;
+    }
+
+    .sidebar { overflow-y: visible; }
+
+    #threeCanvasWrap { height: 180px; }
+
+    .controls { padding: 10px; gap: 12px; }
+
+    .row {
+      grid-template-columns: 56px 1fr 38px;
+      font-size: 10.5px;
+    }
+
+    .status { max-width: 88%; font-size: 12.5px; }
+  }
 </style>
 </head>
 
@@ -505,7 +534,7 @@ async function startCamera() {
   try {
     await initPoseLandmarker();
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 960 }, height: { ideal: 720 } },
+      video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: "user" },
       audio: false,
     });
     video.srcObject = stream;
