@@ -322,6 +322,7 @@ const state = {
   landmarks: null,
   handLandmarks: null,
   heldLightKey: null,
+  lastPalmPoint: null,
   lights: JSON.parse(JSON.stringify(LIGHT_DEFAULTS)),
 };
 
@@ -726,6 +727,22 @@ function drawFaceIllumination(anchorX, anchorY, rx, ry, snapshots) {
   ctx.restore();
 }
 
+// Oclusao real da bola pela cabeca: quando a luz esta atras do plano do
+// rosto (z < 0), redesenha a imagem da camera por cima da regiao oval da
+// cabeca, escondendo a parte da bola que cairia "dentro" dela — e o que
+// da a sensacao de profundidade 3D (a bola passa por tras da cabeca).
+function drawFaceOcclusionPatch(anchorX, anchorY, rx, ry, w, h) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(anchorX, anchorY, rx, ry, 0, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.save();
+  if (toggleMirror.checked) { ctx.translate(w, 0); ctx.scale(-1, 1); }
+  ctx.drawImage(video, 0, 0, w, h);
+  ctx.restore();
+  ctx.restore();
+}
+
 // Luz de contorno (rim/backlight): quando a bola e jogada para tras da
 // cabeca, a luz nao bate de frente no rosto, entao simula-se um brilho
 // artificial na borda do rosto/cabelo do lado por onde a luz esta "vazando".
@@ -804,7 +821,7 @@ function loop() {
       state.handLandmarks = null;
     }
   }
-  if (!state.handLandmarks) state.heldLightKey = null;
+  if (!state.handLandmarks) { state.heldLightKey = null; state.lastPalmPoint = null; }
 
   try {
   const lm = state.landmarks;
@@ -849,21 +866,28 @@ function loop() {
           const d = Math.hypot(grabPoint.x - cx, grabPoint.y - cy);
           if (d < lightRadius(cfg) * 1.4 && d < closestDist) { closestDist = d; closestKey = key; }
         });
-        if (closestKey) state.heldLightKey = closestKey;
+        if (closestKey) { state.heldLightKey = closestKey; state.lastPalmPoint = null; }
       } else if (state.heldLightKey && aperture > RELEASE_APERTURE) {
         state.heldLightKey = null;
+        state.lastPalmPoint = null;
       }
 
+      // Controle por arraste incremental (como girar um globo): usa o
+      // deslocamento da mao entre frames, nao a posicao absoluta. Isso
+      // permite girar a bola 360 graus, inclusive para tras da cabeca —
+      // uma projecao absoluta (via asin) nunca passaria de +-90 graus.
       if (state.heldLightKey) {
         const cfg = state.lights[state.heldLightKey];
-        const d = cfg.distance || 1;
-        const dxRaw = (palmPoint.x - anchorX) / screenScale;
-        const dyRaw = -(palmPoint.y - anchorY) / screenScale;
-        const elevationRad = Math.asin(THREE.MathUtils.clamp(dyRaw / d, -1, 1));
-        const cosEl = Math.max(0.05, Math.cos(elevationRad));
-        const azimuthRad = Math.asin(THREE.MathUtils.clamp(dxRaw / (d * cosEl), -1, 1));
-        cfg.azimuth = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(azimuthRad), -180, 180);
-        cfg.elevation = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(elevationRad), -80, 80);
+        if (state.lastPalmPoint) {
+          const dx = palmPoint.x - state.lastPalmPoint.x;
+          const dy = palmPoint.y - state.lastPalmPoint.y;
+          const AZIMUTH_SENSITIVITY = 260;
+          const ELEVATION_SENSITIVITY = 200;
+          const wrapped = cfg.azimuth + (dx / w) * AZIMUTH_SENSITIVITY;
+          cfg.azimuth = ((wrapped + 180) % 360 + 360) % 360 - 180;
+          cfg.elevation = THREE.MathUtils.clamp(cfg.elevation - (dy / h) * ELEVATION_SENSITIVITY, -80, 80);
+        }
+        state.lastPalmPoint = palmPoint;
 
         const sizeT = THREE.MathUtils.clamp((aperture - GRAB_APERTURE) / (RELEASE_APERTURE - GRAB_APERTURE), 0, 1);
         cfg.size = THREE.MathUtils.lerp(0.5, 2.3, sizeT);
@@ -883,6 +907,9 @@ function loop() {
     lightSnapshots.forEach(({ cfg, vec3, facing, backFacing }) => {
       drawRimLight(anchorX, anchorY, vec3, cfg, backFacing, rxFace, ryFace);
       drawLightGlow(anchorX, anchorY, vec3, cfg, facing, lightRadius(cfg));
+      if (vec3.z < 0) {
+        drawFaceOcclusionPatch(anchorX, anchorY, rxFace, ryFace, w, h);
+      }
     });
 
     if (handTrackingEnabled && state.handLandmarks) {
