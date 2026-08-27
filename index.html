@@ -253,8 +253,8 @@
     <canvas id="relightCanvas" width="960" height="720"></canvas>
     <div class="status" id="statusBox">
       Ferramenta interna de teste: usa sua câmera para detectar seu rosto e
-      simular 3 luzes de estúdio (bolas de luz flutuantes) posicionadas em um espaço 3D.
-      Faça um pinça (polegar + indicador) perto de uma bola pra segurá-la e mover.
+      simular uma luz de estúdio (uma bola flutuante) posicionada em um espaço 3D.
+      Pinça perto da bola pra segurá-la e mover; abra/feche os dedos segurando pra redimensionar.
       <br><br>
       <button id="startBtn">Ativar câmera</button>
     </div>
@@ -270,29 +270,12 @@
 
     <div class="controls">
 
-      <div class="light-group" data-light="key">
-        <h3><span class="swatch" style="background:#ffb347"></span>KEY LIGHT</h3>
+      <div class="light-group" data-light="main">
+        <h3><span class="swatch" style="background:#ffb347"></span>LUZ</h3>
         <div class="row"><label>Azimute</label><input type="range" class="azimuth" min="-180" max="180" step="1"><span></span></div>
         <div class="row"><label>Elevação</label><input type="range" class="elevation" min="-80" max="80" step="1"><span></span></div>
         <div class="row"><label>Distância</label><input type="range" class="distance" min="0.4" max="2.2" step="0.05"><span></span></div>
-        <div class="row"><label>Intensidade</label><input type="range" class="intensity" min="0" max="100" step="1"><span></span></div>
-        <div class="row"><label>Cor (K)</label><input type="range" class="temp" min="2700" max="9000" step="50"><span></span></div>
-      </div>
-
-      <div class="light-group" data-light="fill">
-        <h3><span class="swatch" style="background:#5fb7ff"></span>FILL LIGHT</h3>
-        <div class="row"><label>Azimute</label><input type="range" class="azimuth" min="-180" max="180" step="1"><span></span></div>
-        <div class="row"><label>Elevação</label><input type="range" class="elevation" min="-80" max="80" step="1"><span></span></div>
-        <div class="row"><label>Distância</label><input type="range" class="distance" min="0.4" max="2.2" step="0.05"><span></span></div>
-        <div class="row"><label>Intensidade</label><input type="range" class="intensity" min="0" max="100" step="1"><span></span></div>
-        <div class="row"><label>Cor (K)</label><input type="range" class="temp" min="2700" max="9000" step="50"><span></span></div>
-      </div>
-
-      <div class="light-group" data-light="rim">
-        <h3><span class="swatch" style="background:#ffffff"></span>RIM LIGHT</h3>
-        <div class="row"><label>Azimute</label><input type="range" class="azimuth" min="-180" max="180" step="1"><span></span></div>
-        <div class="row"><label>Elevação</label><input type="range" class="elevation" min="-80" max="80" step="1"><span></span></div>
-        <div class="row"><label>Distância</label><input type="range" class="distance" min="0.4" max="2.2" step="0.05"><span></span></div>
+        <div class="row"><label>Tamanho</label><input type="range" class="size" min="0.4" max="2.5" step="0.05"><span></span></div>
         <div class="row"><label>Intensidade</label><input type="range" class="intensity" min="0" max="100" step="1"><span></span></div>
         <div class="row"><label>Cor (K)</label><input type="range" class="temp" min="2700" max="9000" step="50"><span></span></div>
       </div>
@@ -331,9 +314,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { FaceLandmarker, HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const LIGHT_DEFAULTS = {
-  key:  { azimuth: 40,  elevation: 22, distance: 0.9, intensity: 82, temp: 4400 },
-  fill: { azimuth: -55, elevation: 8,  distance: 1.3, intensity: 38, temp: 6200 },
-  rim:  { azimuth: 165, elevation: 32, distance: 1.1, intensity: 58, temp: 5600 },
+  main: { azimuth: 40, elevation: 22, distance: 0.9, size: 1, intensity: 82, temp: 4400 },
 };
 
 const state = {
@@ -470,10 +451,10 @@ resizeThree();
 
 // --- Controles das luzes -----------------------------------------------
 
-const lightInputs = { key: {}, fill: {}, rim: {} };
+const lightInputs = { main: {} };
 
 function fieldUnit(field) {
-  return field === "temp" ? "K" : (field === "distance" ? "×" : "°");
+  return field === "temp" ? "K" : ((field === "distance" || field === "size") ? "×" : "°");
 }
 
 function refreshLightInputLabel(key, field) {
@@ -486,7 +467,7 @@ function refreshLightInputLabel(key, field) {
 document.querySelectorAll(".light-group").forEach(group => {
   const key = group.dataset.light;
   const cfg = state.lights[key];
-  ["azimuth", "elevation", "distance", "intensity", "temp"].forEach(field => {
+  ["azimuth", "elevation", "distance", "size", "intensity", "temp"].forEach(field => {
     const input = group.querySelector("." + field);
     const out = input.parentElement.querySelector("span");
     lightInputs[key][field] = { input, out };
@@ -633,17 +614,28 @@ function computeHandHullPointsPx(lm, mirrorX, w, h) {
   return HAND_HULL_INDEXES.map(i => ({ x: mirrorX(lm[i].x) * w, y: lm[i].y * h }));
 }
 
-function isPinching(lm) {
+const GRAB_APERTURE = 0.55;
+const RELEASE_APERTURE = 1.3;
+
+// Razao entre a distancia polegar-indicador e o tamanho da mao (pulso ate
+// base do dedo medio) — independe de quao perto a mao esta da camera.
+function pinchApertureRatio(lm) {
   const thumb = lm[4], index = lm[8];
   const wrist = lm[0], middleMcp = lm[9];
   const handSize = Math.hypot(middleMcp.x - wrist.x, middleMcp.y - wrist.y) || 0.001;
-  const pinchDist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
-  return (pinchDist / handSize) < 0.55;
+  return Math.hypot(thumb.x - index.x, thumb.y - index.y) / handSize;
 }
 
 function pinchPointPx(lm, mirrorX, w, h) {
   const thumb = lm[4], index = lm[8];
   const mx = (thumb.x + index.x) / 2, my = (thumb.y + index.y) / 2;
+  return { x: mirrorX(mx) * w, y: my * h };
+}
+
+function palmCenterPx(lm, mirrorX, w, h) {
+  const wrist = lm[0], indexMcp = lm[5], pinkyMcp = lm[17];
+  const mx = (wrist.x + indexMcp.x + pinkyMcp.x) / 3;
+  const my = (wrist.y + indexMcp.y + pinkyMcp.y) / 3;
   return { x: mirrorX(mx) * w, y: my * h };
 }
 
@@ -732,7 +724,7 @@ function loop() {
     const anchorX = mirrorX(center.x) * w;
     const anchorY = center.y * h;
     const faceWidthPx = Math.hypot(lm[454].x - lm[234].x, lm[454].y - lm[234].y) * w;
-    const orbRadius = THREE.MathUtils.clamp(faceWidthPx * 0.85, 40, canvas.width * 0.5);
+    const baseOrbRadius = THREE.MathUtils.clamp(faceWidthPx * 0.85, 40, canvas.width * 0.5);
     const screenScale = Math.min(w, h) * 0.55;
 
     function lightFacing(cfg) {
@@ -740,44 +732,53 @@ function loop() {
       const lightDir = vec3.clone().normalize();
       return { vec3, facing: THREE.MathUtils.clamp(0.15 + 0.85 * ((normal.dot(lightDir) + 1) / 2), 0.08, 1) };
     }
+    function lightRadius(cfg) {
+      return baseOrbRadius * (cfg.size || 1);
+    }
 
     if (handTrackingEnabled && state.handLandmarks) {
       const hlm = state.handLandmarks;
-      const pinching = isPinching(hlm);
-      const point = pinchPointPx(hlm, mirrorX, w, h);
+      const aperture = pinchApertureRatio(hlm);
+      const palmPoint = palmCenterPx(hlm, mirrorX, w, h);
 
-      if (pinching && !state.heldLightKey) {
+      if (!state.heldLightKey && aperture < GRAB_APERTURE) {
+        const grabPoint = pinchPointPx(hlm, mirrorX, w, h);
         let closestKey = null, closestDist = Infinity;
         Object.entries(state.lights).forEach(([key, cfg]) => {
           const { vec3 } = lightFacing(cfg);
           const cx = anchorX + vec3.x * screenScale;
           const cy = anchorY - vec3.y * screenScale;
-          const d = Math.hypot(point.x - cx, point.y - cy);
-          if (d < orbRadius * 1.3 && d < closestDist) { closestDist = d; closestKey = key; }
+          const d = Math.hypot(grabPoint.x - cx, grabPoint.y - cy);
+          if (d < lightRadius(cfg) * 1.4 && d < closestDist) { closestDist = d; closestKey = key; }
         });
         if (closestKey) state.heldLightKey = closestKey;
-      } else if (!pinching) {
+      } else if (state.heldLightKey && aperture > RELEASE_APERTURE) {
         state.heldLightKey = null;
       }
 
-      if (pinching && state.heldLightKey) {
+      if (state.heldLightKey) {
         const cfg = state.lights[state.heldLightKey];
         const d = cfg.distance || 1;
-        const dxRaw = (point.x - anchorX) / screenScale;
-        const dyRaw = -(point.y - anchorY) / screenScale;
+        const dxRaw = (palmPoint.x - anchorX) / screenScale;
+        const dyRaw = -(palmPoint.y - anchorY) / screenScale;
         const elevationRad = Math.asin(THREE.MathUtils.clamp(dyRaw / d, -1, 1));
         const cosEl = Math.max(0.05, Math.cos(elevationRad));
         const azimuthRad = Math.asin(THREE.MathUtils.clamp(dxRaw / (d * cosEl), -1, 1));
         cfg.azimuth = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(azimuthRad), -180, 180);
         cfg.elevation = THREE.MathUtils.clamp(THREE.MathUtils.radToDeg(elevationRad), -80, 80);
+
+        const sizeT = THREE.MathUtils.clamp((aperture - GRAB_APERTURE) / (RELEASE_APERTURE - GRAB_APERTURE), 0, 1);
+        cfg.size = THREE.MathUtils.lerp(0.5, 2.3, sizeT);
+
         refreshLightInputLabel(state.heldLightKey, "azimuth");
         refreshLightInputLabel(state.heldLightKey, "elevation");
+        refreshLightInputLabel(state.heldLightKey, "size");
       }
     }
 
     Object.entries(state.lights).forEach(([key, cfg]) => {
       const { vec3, facing } = lightFacing(cfg);
-      drawLightGlow(anchorX, anchorY, vec3, cfg, facing, orbRadius);
+      drawLightGlow(anchorX, anchorY, vec3, cfg, facing, lightRadius(cfg));
     });
 
     if (handTrackingEnabled && state.handLandmarks) {
@@ -796,7 +797,8 @@ function loop() {
       if (state.heldLightKey) {
         const cfg = state.lights[state.heldLightKey];
         const { vec3, facing } = lightFacing(cfg);
-        drawLightGlow(anchorX, anchorY, vec3, cfg, facing, orbRadius);
+        const radius = lightRadius(cfg);
+        drawLightGlow(anchorX, anchorY, vec3, cfg, facing, radius);
 
         const cx = anchorX + vec3.x * screenScale;
         const cy = anchorY - vec3.y * screenScale;
@@ -805,7 +807,7 @@ function loop() {
         ctx.lineWidth = 2;
         ctx.setLineDash([6, 5]);
         ctx.beginPath();
-        ctx.arc(cx, cy, orbRadius * 0.62, 0, Math.PI * 2);
+        ctx.arc(cx, cy, radius * 0.62, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
       }
@@ -861,7 +863,7 @@ function loop() {
     gizmo.position.copy(vec3);
     gizmo.lookAt(0, 0, 0);
     const held = state.heldLightKey === key;
-    const scale = (0.6 + (cfg.intensity / 100) * 0.7) * (held ? 1.35 : 1);
+    const scale = (0.6 + (cfg.intensity / 100) * 0.7) * (cfg.size || 1) * (held ? 1.15 : 1);
     gizmo.scale.setScalar(scale);
     gizmo.material.color.setHex(cfg.color);
     gizmo.children[0].material.color.setHex(cfg.color);
