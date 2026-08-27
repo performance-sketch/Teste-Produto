@@ -682,11 +682,15 @@ function drawFaceIllumination(anchorX, anchorY, rx, ry, snapshots) {
     const alpha = THREE.MathUtils.clamp((cfg.intensity / 100) * facing * 0.9, 0, 1);
     if (alpha <= 0.015) return;
     const [r, g, b] = kelvinToRGB(cfg.temp);
-    const lx = anchorX + vec3.x * rx * 0.85;
-    const ly = anchorY - vec3.y * ry * 0.85;
+    // quanto mais de frente a luz esta, mais o brilho se espalha uniforme
+    // pelo rosto (sem lado marcado) — assim como uma ring light de verdade
+    const evenness = facing;
+    const lx = anchorX + vec3.x * rx * 0.85 * (1 - evenness * 0.7);
+    const ly = anchorY - vec3.y * ry * 0.85 * (1 - evenness * 0.7);
+    const spread = THREE.MathUtils.lerp(0.55, 0.8, evenness);
     const grad = ctx.createRadialGradient(lx, ly, 0, lx, ly, Math.max(rx, ry) * 1.15);
     grad.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
-    grad.addColorStop(0.6, `rgba(${r},${g},${b},${alpha * 0.55})`);
+    grad.addColorStop(spread, `rgba(${r},${g},${b},${alpha * 0.6})`);
     grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
     ctx.fillStyle = grad;
     ctx.beginPath();
@@ -695,6 +699,53 @@ function drawFaceIllumination(anchorX, anchorY, rx, ry, snapshots) {
   });
 
   ctx.restore();
+}
+
+// Catchlight de ring light: o reflexo circular caracteristico da bola nos
+// olhos. E o que faz a luz "parecer" uma ring light de verdade, mesmo
+// sendo uma simulacao — o rosto fica bem iluminado e os olhos ganham
+// aquele brilho em anel tipico de vlogger/estudio.
+function drawEyeCatchlights(lm, mirrorX, w, h, faceWidthPx, snapshots) {
+  const rightIris = lm[468] || average([lm[33], lm[133]]);
+  const leftIris = lm[473] || average([lm[362], lm[263]]);
+  const eyeRadius = Math.max(faceWidthPx * 0.05, 3);
+
+  [rightIris, leftIris].forEach(eye => {
+    if (!eye) return;
+    const ex = mirrorX(eye.x) * w;
+    const ey = eye.y * h;
+
+    snapshots.forEach(({ cfg, vec3, facing }) => {
+      const alpha = THREE.MathUtils.clamp((cfg.intensity / 100) * Math.pow(facing, 1.6) * 0.95, 0, 1);
+      if (alpha <= 0.03) return;
+      const [r, g, b] = kelvinToRGB(cfg.temp);
+      const dir = vec3.clone().normalize();
+      const offsetLimit = eyeRadius * 0.4;
+      const cx = ex + dir.x * offsetLimit;
+      const cy = ey - dir.y * offsetLimit;
+
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+
+      // anel (o formato caracteristico da ring light refletido na pupila)
+      ctx.strokeStyle = `rgba(${Math.min(255, r + 40)},${Math.min(255, g + 40)},${Math.min(255, b + 40)},${alpha})`;
+      ctx.lineWidth = Math.max(1, eyeRadius * 0.32);
+      ctx.beginPath();
+      ctx.arc(cx, cy, eyeRadius * 0.55, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // brilho suave por dentro do anel
+      const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, eyeRadius * 0.32);
+      glow.addColorStop(0, `rgba(255,255,255,${alpha * 0.6})`);
+      glow.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(cx, cy, eyeRadius * 0.32, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    });
+  });
 }
 
 // Oclusao real da bola pela cabeca: quando a luz esta atras do plano do
@@ -881,6 +932,7 @@ function loop() {
         drawFaceOcclusionPatch(anchorX, anchorY, rxFace, ryFace, w, h);
       }
     });
+    drawEyeCatchlights(lm, mirrorX, w, h, faceWidthPx, lightSnapshots);
 
     if (handTrackingEnabled && state.handLandmarks) {
       const hullPx = computeHandHullPointsPx(state.handLandmarks, mirrorX, w, h);
