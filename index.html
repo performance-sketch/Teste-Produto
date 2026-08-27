@@ -83,6 +83,23 @@
   }
   .status button:hover { background: #24a1a6; }
 
+  .loop-warning {
+    display: none;
+    position: absolute;
+    z-index: 6;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 80%;
+    background: rgba(120, 40, 20, .85);
+    border: 1px solid rgba(255, 150, 100, .5);
+    color: #ffe1d0;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    text-align: center;
+  }
+
   .snapshot-btn {
     position: absolute;
     z-index: 6;
@@ -212,6 +229,7 @@
       <button id="startBtn">Ativar câmera</button>
     </div>
     <button class="snapshot-btn" id="snapshotBtn" style="display:none;">Salvar still (PNG)</button>
+    <div class="loop-warning" id="loopWarning"></div>
   </div>
 
   <div class="sidebar">
@@ -546,14 +564,17 @@ function drawLightGlow(anchorX, anchorY, vec3, cfg) {
   ctx.globalCompositeOperation = "source-over";
 }
 
+let poseDetectionEnabled = true;
+
+function showLoopWarning(message) {
+  const el = document.getElementById("loopWarning");
+  if (!el) return;
+  el.textContent = message;
+  el.style.display = "block";
+}
+
 function loop() {
   if (!state.running) return;
-
-  if (video.currentTime !== lastVideoTime) {
-    lastVideoTime = video.currentTime;
-    const result = poseLandmarker.detectForVideo(video, performance.now());
-    state.landmarks = (result.landmarks && result.landmarks[0]) || null;
-  }
 
   const w = canvas.width, h = canvas.height;
   ctx.save();
@@ -564,6 +585,20 @@ function loop() {
   ctx.drawImage(video, 0, 0, w, h);
   ctx.restore();
 
+  if (poseDetectionEnabled && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    try {
+      const result = poseLandmarker.detectForVideo(video, performance.now());
+      state.landmarks = (result.landmarks && result.landmarks[0]) || null;
+    } catch (err) {
+      console.error("Falha na detecção de pose, desativando tracking:", err);
+      poseDetectionEnabled = false;
+      state.landmarks = null;
+      showLoopWarning("Rastreamento de corpo falhou neste navegador (a câmera continua funcionando, mas sem luz automática). Detalhe: " + (err && err.message ? err.message : err));
+    }
+  }
+
+  try {
   const lm = state.landmarks;
 
   if (lm) {
@@ -635,6 +670,10 @@ function loop() {
 
   orbit.update();
   threeRenderer.render(threeScene, threeCamera);
+  } catch (err) {
+    console.error("Falha ao renderizar luzes/cena 3D:", err);
+    showLoopWarning("Erro ao renderizar as luzes/cena 3D (a câmera continua funcionando). Detalhe: " + (err && err.message ? err.message : err));
+  }
 
   requestAnimationFrame(loop);
 }
