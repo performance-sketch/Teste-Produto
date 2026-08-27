@@ -418,21 +418,29 @@ const faceLines = FACE_CONNECTIONS.map(() => {
   return line;
 });
 
-const placeholderHead = new THREE.Mesh(
-  new THREE.SphereGeometry(0.34, 20, 16),
-  new THREE.MeshStandardMaterial({ color: 0x1c2a2d, roughness: 0.9 })
+const HEAD_BASE_SCALE = new THREE.Vector3(0.86, 1.05, 0.92);
+const headMesh = new THREE.Mesh(
+  new THREE.SphereGeometry(0.34, 32, 24),
+  new THREE.MeshStandardMaterial({ color: 0x24383c, roughness: 0.82, metalness: 0.04 })
 );
-faceGroup.add(placeholderHead);
+headMesh.scale.copy(HEAD_BASE_SCALE);
+faceGroup.add(headMesh);
 
 const lightGizmos = {};
 Object.entries(state.lights).forEach(([key, cfg]) => {
   const gizmo = new THREE.Mesh(
-    new THREE.SphereGeometry(0.09, 20, 16),
-    new THREE.MeshBasicMaterial({ color: cfg.color })
+    new THREE.SphereGeometry(0.09, 32, 24),
+    new THREE.MeshStandardMaterial({
+      color: cfg.color,
+      emissive: cfg.color,
+      emissiveIntensity: 0.55,
+      roughness: 0.25,
+      metalness: 0.12,
+    })
   );
   const halo = new THREE.Mesh(
     new THREE.SphereGeometry(0.16, 20, 16),
-    new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.25, side: THREE.BackSide })
+    new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.18, side: THREE.BackSide })
   );
   gizmo.add(halo);
   threeScene.add(gizmo);
@@ -652,19 +660,103 @@ function drawLightGlow(anchorX, anchorY, vec3, cfg, facing, orbRadius) {
   const cy = anchorY + offsetY;
 
   const [r, g, b] = kelvinToRGB(cfg.temp);
-  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, orbRadius);
-  grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
-  grad.addColorStop(0.55, `rgba(255,255,255,${alpha})`);
-  grad.addColorStop(0.7, `rgba(${r},${g},${b},${alpha})`);
-  grad.addColorStop(0.86, `rgba(${r},${g},${b},${alpha * 0.9})`);
-  grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
 
+  // halo (bloom suave ao redor da bola, para continuar lendo como fonte de luz)
+  const haloGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, orbRadius);
+  haloGrad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+  haloGrad.addColorStop(0.5, `rgba(255,255,255,${alpha * 0.7})`);
+  haloGrad.addColorStop(0.72, `rgba(${r},${g},${b},${alpha * 0.55})`);
+  haloGrad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  ctx.save();
   ctx.globalCompositeOperation = "screen";
-  ctx.fillStyle = grad;
+  ctx.fillStyle = haloGrad;
   ctx.beginPath();
   ctx.arc(cx, cy, orbRadius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.globalCompositeOperation = "source-over";
+  ctx.restore();
+
+  // esfera solida (a "bola" em si, com sombreamento e borda definida)
+  const ballRadius = orbRadius * 0.42;
+  const hlx = cx - ballRadius * 0.35;
+  const hly = cy - ballRadius * 0.4;
+  const ballGrad = ctx.createRadialGradient(hlx, hly, ballRadius * 0.05, cx, cy, ballRadius);
+  ballGrad.addColorStop(0, `rgba(255,255,255,${Math.min(1, alpha * 1.15)})`);
+  ballGrad.addColorStop(0.35, `rgba(${Math.min(255, r + 60)},${Math.min(255, g + 60)},${Math.min(255, b + 60)},${alpha})`);
+  ballGrad.addColorStop(0.75, `rgba(${r},${g},${b},${alpha})`);
+  ballGrad.addColorStop(1, `rgba(${Math.round(r * 0.55)},${Math.round(g * 0.55)},${Math.round(b * 0.55)},${alpha})`);
+  ctx.save();
+  ctx.fillStyle = ballGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, ballRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(${Math.round(r * 0.4)},${Math.round(g * 0.4)},${Math.round(b * 0.4)},${alpha * 0.6})`;
+  ctx.lineWidth = Math.max(1, ballRadius * 0.06);
+  ctx.beginPath();
+  ctx.arc(cx, cy, ballRadius * 0.98, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Pinta a luz de fato "sobre a pele": um brilho colorido recortado ao formato
+// oval da cabeca, deslocado na direcao da luz — e o que faz a bola iluminar
+// o rosto (de frente) ou a lateral do rosto (quando a luz esta de lado).
+function drawFaceIllumination(anchorX, anchorY, rx, ry, snapshots) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(anchorX, anchorY, rx, ry, 0, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.globalCompositeOperation = "screen";
+
+  snapshots.forEach(({ cfg, vec3, facing }) => {
+    const alpha = THREE.MathUtils.clamp((cfg.intensity / 100) * facing * 0.9, 0, 1);
+    if (alpha <= 0.015) return;
+    const [r, g, b] = kelvinToRGB(cfg.temp);
+    const lx = anchorX + vec3.x * rx * 0.85;
+    const ly = anchorY - vec3.y * ry * 0.85;
+    const grad = ctx.createRadialGradient(lx, ly, 0, lx, ly, Math.max(rx, ry) * 1.15);
+    grad.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
+    grad.addColorStop(0.6, `rgba(${r},${g},${b},${alpha * 0.55})`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(anchorX, anchorY, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.restore();
+}
+
+// Luz de contorno (rim/backlight): quando a bola e jogada para tras da
+// cabeca, a luz nao bate de frente no rosto, entao simula-se um brilho
+// artificial na borda do rosto/cabelo do lado por onde a luz esta "vazando".
+function drawRimLight(anchorX, anchorY, vec3, cfg, backFacing, rx, ry) {
+  if (backFacing <= 0.04) return;
+  const [r, g, b] = kelvinToRGB(cfg.temp);
+  const dist = Math.max(cfg.distance, 0.05);
+  const bias = THREE.MathUtils.clamp(vec3.x / dist, -1, 1);
+  const verticalBias = THREE.MathUtils.clamp(-vec3.y / dist, -1, 1);
+  const leftWeight = THREE.MathUtils.clamp(0.5 - bias * 0.6, 0, 1);
+  const rightWeight = THREE.MathUtils.clamp(0.5 + bias * 0.6, 0, 1);
+  const baseAlpha = (cfg.intensity / 100) * backFacing;
+  const glowR = rx * 0.55;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  [[-1, leftWeight], [1, rightWeight]].forEach(([side, weight]) => {
+    const alpha = THREE.MathUtils.clamp(baseAlpha * weight * 1.3, 0, 1);
+    if (alpha <= 0.015) return;
+    const ex = anchorX + side * rx * 0.98;
+    const ey = anchorY - verticalBias * ry * 0.35;
+    const grad = ctx.createRadialGradient(ex, ey, 0, ex, ey, glowR);
+    grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    grad.addColorStop(0.45, `rgba(${r},${g},${b},${alpha * 0.85})`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(ex, ey, glowR, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.restore();
 }
 
 let faceDetectionEnabled = true;
@@ -724,13 +816,19 @@ function loop() {
     const anchorX = mirrorX(center.x) * w;
     const anchorY = center.y * h;
     const faceWidthPx = Math.hypot(lm[454].x - lm[234].x, lm[454].y - lm[234].y) * w;
+    const faceHeightPx = Math.hypot(lm[10].x - lm[152].x, lm[10].y - lm[152].y) * h;
+    const rxFace = faceWidthPx * 0.58;
+    const ryFace = Math.max(faceHeightPx * 0.62, rxFace * 1.15);
     const baseOrbRadius = THREE.MathUtils.clamp(faceWidthPx * 0.85, 40, canvas.width * 0.5);
     const screenScale = Math.min(w, h) * 0.55;
 
     function lightFacing(cfg) {
       const vec3 = sphericalToVec3(cfg.azimuth, cfg.elevation, cfg.distance);
       const lightDir = vec3.clone().normalize();
-      return { vec3, facing: THREE.MathUtils.clamp(0.15 + 0.85 * ((normal.dot(lightDir) + 1) / 2), 0.08, 1) };
+      const dot = normal.dot(lightDir);
+      const facing = THREE.MathUtils.clamp(0.15 + 0.85 * ((dot + 1) / 2), 0.08, 1);
+      const backFacing = THREE.MathUtils.clamp(-dot, 0, 1);
+      return { vec3, facing, backFacing };
     }
     function lightRadius(cfg) {
       return baseOrbRadius * (cfg.size || 1);
@@ -776,8 +874,14 @@ function loop() {
       }
     }
 
-    Object.entries(state.lights).forEach(([key, cfg]) => {
-      const { vec3, facing } = lightFacing(cfg);
+    const lightSnapshots = Object.entries(state.lights).map(([key, cfg]) => {
+      const { vec3, facing, backFacing } = lightFacing(cfg);
+      return { key, cfg, vec3, facing, backFacing };
+    });
+
+    drawFaceIllumination(anchorX, anchorY, rxFace, ryFace, lightSnapshots);
+    lightSnapshots.forEach(({ cfg, vec3, facing, backFacing }) => {
+      drawRimLight(anchorX, anchorY, vec3, cfg, backFacing, rxFace, ryFace);
       drawLightGlow(anchorX, anchorY, vec3, cfg, facing, lightRadius(cfg));
     });
 
@@ -837,16 +941,27 @@ function loop() {
     }
 
     faceGroup.visible = true;
-    placeholderHead.visible = false;
+
+    // cabeca solida: orientada e escalada pela normal/largura do rosto detectado
+    headMesh.visible = true;
+    const headScaleT = THREE.MathUtils.clamp(faceWidthPx / (canvas.width * 0.22), 0.6, 1.8);
+    headMesh.scale.set(
+      HEAD_BASE_SCALE.x * headScaleT,
+      HEAD_BASE_SCALE.y * headScaleT,
+      HEAD_BASE_SCALE.z * headScaleT
+    );
+    headMesh.lookAt(normal.x, normal.y, normal.z);
+
+    const showSkeleton = toggleSkeleton.checked;
     FACE_POINT_INDEXES.forEach(i => {
       const p = lm[i];
       const mesh = facePointMeshes[i];
-      mesh.visible = true;
+      mesh.visible = showSkeleton;
       mesh.position.set((p.x - center.x) * -6, -(p.y - center.y) * 6, -(p.z - center.z) * 6);
     });
     FACE_CONNECTIONS.forEach(([a, b], idx) => {
       const line = faceLines[idx];
-      line.visible = true;
+      line.visible = showSkeleton;
       const pos = line.geometry.attributes.position;
       const ma = facePointMeshes[a].position, mb = facePointMeshes[b].position;
       pos.setXYZ(0, ma.x, ma.y, ma.z);
@@ -854,7 +969,11 @@ function loop() {
       pos.needsUpdate = true;
     });
   } else {
-    placeholderHead.visible = true;
+    headMesh.visible = true;
+    headMesh.quaternion.identity();
+    headMesh.scale.copy(HEAD_BASE_SCALE);
+    FACE_POINT_INDEXES.forEach(i => { facePointMeshes[i].visible = false; });
+    faceLines.forEach(line => { line.visible = false; });
   }
 
   Object.entries(state.lights).forEach(([key, cfg]) => {
@@ -866,8 +985,9 @@ function loop() {
     const scale = (0.6 + (cfg.intensity / 100) * 0.7) * (cfg.size || 1) * (held ? 1.15 : 1);
     gizmo.scale.setScalar(scale);
     gizmo.material.color.setHex(cfg.color);
+    gizmo.material.emissive.setHex(cfg.color);
     gizmo.children[0].material.color.setHex(cfg.color);
-    gizmo.children[0].material.opacity = held ? 0.55 : 0.25;
+    gizmo.children[0].material.opacity = held ? 0.4 : 0.18;
   });
 
   orbit.update();
