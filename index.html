@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vertical Rio — Relight Lab (teste interno)</title>
+
+<style>
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    background: #0b0f11;
+    color: #e8f0f1;
+    font-family: Arial, Helvetica, sans-serif;
+    overflow: hidden;
+  }
+
+  .app {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    width: 100vw;
+    height: 100vh;
+    gap: 2px;
+    background: #000;
+  }
+
+  .stage {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+
+  #relightCanvas {
+    max-width: 100%;
+    max-height: 100%;
+    background: #000;
+  }
+
+  .stage-label {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 5;
+    padding: 5px 9px;
+    border-radius: 5px;
+    background: rgba(0,0,0,.55);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .03em;
+  }
+
+  .status {
+    position: absolute;
+    z-index: 6;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    color: #9db0b3;
+    font-size: 13px;
+    max-width: 320px;
+    line-height: 1.5;
+  }
+
+  .status button {
+    margin-top: 12px;
+    background: #1f8a8f;
+    border: none;
+    color: #fff;
+    padding: 9px 18px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .status button:hover { background: #24a1a6; }
+
+  .snapshot-btn {
+    position: absolute;
+    z-index: 6;
+    bottom: 12px;
+    right: 12px;
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.25);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .snapshot-btn:hover { background: rgba(255,255,255,.22); }
+
+  .sidebar {
+    background: #10171a;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #threeCanvasWrap {
+    position: relative;
+    width: 100%;
+    height: 220px;
+    flex-shrink: 0;
+    background: #05080a;
+    border-bottom: 1px solid #22313500;
+  }
+
+  #threeCanvasWrap canvas { display: block; }
+
+  .panel-label {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 5;
+    padding: 4px 7px;
+    border-radius: 4px;
+    background: rgba(0,0,0,.5);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    pointer-events: none;
+  }
+
+  .controls {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .light-group {
+    background: #172124;
+    border: 1px solid #26363a;
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .light-group h3 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    letter-spacing: .04em;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 64px 1fr 40px;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #9db0b3;
+    margin-bottom: 6px;
+  }
+
+  .row input[type=range] { width: 100%; }
+  .row span { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .global-group {
+    background: #172124;
+    border: 1px solid #26363a;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+
+  .global-group label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+
+  .footer-note {
+    padding: 10px 14px 16px;
+    font-size: 10.5px;
+    color: #5c7275;
+    line-height: 1.5;
+  }
+</style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <div class="stage">
+    <div class="stage-label">CÂMERA — RELIGHT AO VIVO</div>
+    <canvas id="relightCanvas" width="960" height="720"></canvas>
+    <div class="status" id="statusBox">
+      Ferramenta interna de teste: usa sua câmera para detectar seu corpo e
+      simular 3 luzes de estúdio posicionadas em um espaço 3D.
+      <br><br>
+      <button id="startBtn">Ativar câmera</button>
+    </div>
+    <button class="snapshot-btn" id="snapshotBtn" style="display:none;">Salvar still (PNG)</button>
+  </div>
+
+  <div class="sidebar">
+
+    <div id="threeCanvasWrap">
+      <div class="panel-label">POSIÇÃO 3D DAS LUZES</div>
+    </div>
+
+    <div class="controls">
+
+      <div class="light-group" data-light="key">
+        <h3><span class="swatch" style="background:#ffb347"></span>KEY LIGHT</h3>
+        <div class="row"><label>Azimute</label><input type="range" class="azimuth" min="-180" max="180" step="1"><span></span></div>
+        <div class="row"><label>Elevação</label><input type="range" class="elevation" min="-80" max="80" step="1"><span></span></div>
+        <div class="row"><label>Distância</label><input type="range" class="distance" min="0.4" max="2.2" step="0.05"><span></span></div>
+        <div class="row"><label>Intensidade</label><input type="range" class="intensity" min="0" max="100" step="1"><span></span></div>
+        <div class="row"><label>Cor (K)</label><input type="range" class="temp" min="2700" max="9000" step="50"><span></span></div>
+      </div>
+
+      <div class="light-group" data-light="fill">
+        <h3><span class="swatch" style="background:#5fb7ff"></span>FILL LIGHT</h3>
+        <div class="row"><label>Azimute</label><input type="range" class="azimuth" min="-180" max="180" step="1"><span></span></div>
+        <div class="row"><label>Elevação</label><input type="range" class="elevation" min="-80" max="80" step="1"><span></span></div>
+        <div class="row"><label>Distância</label><input type="range" class="distance" min="0.4" max="2.2" step="0.05"><span></span></div>
+        <div class="row"><label>Intensidade</label><input type="range" class="intensity" min="0" max="100" step="1"><span></span></div>
+        <div class="row"><label>Cor (K)</label><input type="range" class="temp" min="2700" max="9000" step="50"><span></span></div>
+      </div>
+
+      <div class="light-group" data-light="rim">
+        <h3><span class="swatch" style="background:#ffffff"></span>RIM LIGHT</h3>
+        <div class="row"><label>Azimute</label><input type="range" class="azimuth" min="-180" max="180" step="1"><span></span></div>
+        <div class="row"><label>Elevação</label><input type="range" class="elevation" min="-80" max="80" step="1"><span></span></div>
+        <div class="row"><label>Distância</label><input type="range" class="distance" min="0.4" max="2.2" step="0.05"><span></span></div>
+        <div class="row"><label>Intensidade</label><input type="range" class="intensity" min="0" max="100" step="1"><span></span></div>
+        <div class="row"><label>Cor (K)</label><input type="range" class="temp" min="2700" max="9000" step="50"><span></span></div>
+      </div>
+
+      <div class="global-group">
+        <label><input type="checkbox" id="toggleSkeleton"> Mostrar esqueleto detectado</label>
+        <label><input type="checkbox" id="toggleMirror" checked> Espelhar imagem</label>
+      </div>
+
+      <div class="footer-note">
+        Protótipo interno (uso de teste). Rastreamento de corpo via MediaPipe Pose
+        Landmarker rodando localmente no navegador — nenhum vídeo é enviado a servidor
+        algum. A iluminação é uma aproximação visual (relight 2D projetado a partir de
+        um vetor 3D real), não um render fisicamente exato.
+      </div>
+
+    </div>
+  </div>
+
+</div>
+
+<video id="webcam" autoplay playsinline muted style="display:none;"></video>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const LIGHT_DEFAULTS = {
+  key:  { azimuth: 40,  elevation: 22, distance: 0.9, intensity: 82, temp: 4400 },
+  fill: { azimuth: -55, elevation: 8,  distance: 1.3, intensity: 38, temp: 6200 },
+  rim:  { azimuth: 165, elevation: 32, distance: 1.1, intensity: 58, temp: 5600 },
+};
+
+const state = {
+  running: false,
+  landmarks: null,
+  lights: JSON.parse(JSON.stringify(LIGHT_DEFAULTS)),
+};
+
+function kelvinToRGBHex(kelvin) {
+  const [r, g, b] = kelvinToRGB(kelvin);
+  return (r << 16) | (g << 8) | b;
+}
+
+function kelvinToRGB(kelvin) {
+  const temp = kelvin / 100;
+  let r, g, b;
+  if (temp <= 66) {
+    r = 255;
+    g = 99.47 * Math.log(temp) - 161.12;
+  } else {
+    r = 329.7 * Math.pow(temp - 60, -0.133);
+    g = 288.12 * Math.pow(temp - 60, -0.0755);
+  }
+  if (temp >= 66) {
+    b = 255;
+  } else if (temp <= 19) {
+    b = 0;
+  } else {
+    b = 138.52 * Math.log(temp - 10) - 305.04;
+  }
+  const clamp = v => Math.max(0, Math.min(255, Math.round(v)));
+  return [clamp(r), clamp(g), clamp(b)];
+}
+
+Object.values(state.lights).forEach(cfg => { cfg.color = kelvinToRGBHex(cfg.temp); });
+
+function sphericalToVec3(azimuthDeg, elevationDeg, distance) {
+  const az = THREE.MathUtils.degToRad(azimuthDeg);
+  const el = THREE.MathUtils.degToRad(elevationDeg);
+  const x = distance * Math.cos(el) * Math.sin(az);
+  const y = distance * Math.sin(el);
+  const z = distance * Math.cos(el) * Math.cos(az);
+  return new THREE.Vector3(x, y, z);
+}
+
+// --- Three.js: cena de posicionamento 3D das luzes -------------------------
+
+const threeWrap = document.getElementById("threeCanvasWrap");
+const threeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+threeRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+threeWrap.appendChild(threeRenderer.domElement);
+
+const threeScene = new THREE.Scene();
+const threeCamera = new THREE.PerspectiveCamera(45, 1, 0.05, 20);
+threeCamera.position.set(1.8, 1.1, 2.4);
+
+const orbit = new OrbitControls(threeCamera, threeRenderer.domElement);
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.08;
+orbit.target.set(0, 0, 0);
+
+threeScene.add(new THREE.AmbientLight(0x404850, 1.4));
+const rimHint = new THREE.PointLight(0xffffff, 0.6);
+rimHint.position.set(0, 2, 2);
+threeScene.add(rimHint);
+
+const floorGrid = new THREE.GridHelper(3, 12, 0x2a3a3d, 0x1a2528);
+floorGrid.position.y = -0.95;
+threeScene.add(floorGrid);
+
+const bodyGroup = new THREE.Group();
+threeScene.add(bodyGroup);
+
+const BODY_POINT_INDEXES = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+const BODY_CONNECTIONS = [
+  [0, 11], [0, 12], [11, 12],
+  [11, 13], [13, 15], [12, 14], [14, 16],
+  [11, 23], [12, 24], [23, 24],
+  [23, 25], [25, 27], [24, 26], [26, 28],
+];
+
+const bodyPointMeshes = {};
+const bodyPointGeo = new THREE.SphereGeometry(0.028, 10, 10);
+const bodyPointMat = new THREE.MeshBasicMaterial({ color: 0x6fe3d6 });
+BODY_POINT_INDEXES.forEach(i => {
+  const m = new THREE.Mesh(bodyPointGeo, bodyPointMat);
+  m.visible = false;
+  bodyGroup.add(m);
+  bodyPointMeshes[i] = m;
+});
+
+const boneLines = BODY_CONNECTIONS.map(() => {
+  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const mat = new THREE.LineBasicMaterial({ color: 0x2fa89c });
+  const line = new THREE.Line(geo, mat);
+  line.visible = false;
+  bodyGroup.add(line);
+  return line;
+});
+
+const placeholderMannequin = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.32, 0.75, 4, 10),
+  new THREE.MeshStandardMaterial({ color: 0x1c2a2d, roughness: 0.9 })
+);
+placeholderMannequin.position.y = 0;
+bodyGroup.add(placeholderMannequin);
+
+const lightGizmos = {};
+Object.entries(state.lights).forEach(([key, cfg]) => {
+  const gizmo = new THREE.Mesh(
+    new THREE.SphereGeometry(0.075, 16, 16),
+    new THREE.MeshBasicMaterial({ color: cfg.color })
+  );
+  const beam = new THREE.Mesh(
+    new THREE.ConeGeometry(0.05, 0.28, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+  );
+  gizmo.add(beam);
+  beam.position.set(0, 0.16, 0);
+  beam.rotation.x = Math.PI;
+  threeScene.add(gizmo);
+  lightGizmos[key] = gizmo;
+});
+
+function resizeThree() {
+  const w = threeWrap.clientWidth;
+  const h = threeWrap.clientHeight;
+  threeRenderer.setSize(w, h, false);
+  threeCamera.aspect = w / h;
+  threeCamera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resizeThree);
+resizeThree();
+
+// --- Controles das luzes -----------------------------------------------
+
+document.querySelectorAll(".light-group").forEach(group => {
+  const key = group.dataset.light;
+  const cfg = state.lights[key];
+  ["azimuth", "elevation", "distance", "intensity", "temp"].forEach(field => {
+    const input = group.querySelector("." + field);
+    const out = input.parentElement.querySelector("span");
+    input.value = cfg[field];
+    const unit = field === "temp" ? "K" : (field === "distance" ? "×" : "°");
+    out.textContent = field === "intensity" ? cfg[field] + "%" : cfg[field] + unit;
+    input.addEventListener("input", () => {
+      cfg[field] = parseFloat(input.value);
+      out.textContent = field === "intensity" ? cfg[field] + "%" : cfg[field] + unit;
+      if (field === "temp") {
+        cfg.color = kelvinToRGBHex(cfg.temp);
+      }
+    });
+  });
+});
+
+const toggleSkeleton = document.getElementById("toggleSkeleton");
+const toggleMirror = document.getElementById("toggleMirror");
+
+// --- MediaPipe Pose Landmarker -------------------------------------------
+
+const video = document.getElementById("webcam");
+const canvas = document.getElementById("relightCanvas");
+const ctx = canvas.getContext("2d");
+const statusBox = document.getElementById("statusBox");
+const startBtn = document.getElementById("startBtn");
+const snapshotBtn = document.getElementById("snapshotBtn");
+
+let poseLandmarker = null;
+let lastVideoTime = -1;
+
+async function initPoseLandmarker() {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  try {
+    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        delegate: "GPU",
+      },
+      runningMode: "VIDEO",
+      numPoses: 1,
+    });
+  } catch (e) {
+    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        delegate: "CPU",
+      },
+      runningMode: "VIDEO",
+      numPoses: 1,
+    });
+  }
+}
+
+async function startCamera() {
+  startBtn.disabled = true;
+  statusBox.innerHTML = "Carregando modelo de detecção de corpo...";
+  try {
+    await initPoseLandmarker();
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 960 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+    canvas.width = video.videoWidth || 960;
+    canvas.height = video.videoHeight || 720;
+    statusBox.style.display = "none";
+    snapshotBtn.style.display = "block";
+    state.running = true;
+    requestAnimationFrame(loop);
+  } catch (err) {
+    statusBox.innerHTML = "Não foi possível acessar a câmera ou carregar o modelo.<br>" +
+      "<span style='color:#ff8a8a'>" + (err && err.message ? err.message : err) + "</span><br><br>" +
+      "<button id='retryBtn'>Tentar novamente</button>";
+    document.getElementById("retryBtn").addEventListener("click", startCamera);
+  }
+}
+startBtn.addEventListener("click", startCamera);
+
+snapshotBtn.addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.download = "relight-still.png";
+  a.href = canvas.toDataURL("image/png");
+  a.click();
+});
+
+function midpoint(a, b) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
+}
+
+function drawLightGlow(anchorX, anchorY, vec3, cfg) {
+  const facing = THREE.MathUtils.clamp(0.2 + 0.8 * ((vec3.z / cfg.distance + 1) / 2), 0.12, 1);
+  const distanceFalloff = 1 / (0.55 + cfg.distance * cfg.distance);
+  const alpha = THREE.MathUtils.clamp((cfg.intensity / 100) * facing * distanceFalloff, 0, 1);
+  if (alpha <= 0.01) return;
+
+  const screenScale = Math.min(canvas.width, canvas.height) * 0.55;
+  const offsetX = vec3.x * screenScale;
+  const offsetY = -vec3.y * screenScale;
+  const closeness = THREE.MathUtils.clamp((cfg.distance - 0.4) / 1.8, 0, 1);
+  const radius = THREE.MathUtils.lerp(canvas.width * 0.34, canvas.width * 0.14, closeness);
+
+  const cx = anchorX + offsetX;
+  const cy = anchorY + offsetY;
+
+  const [r, g, b] = kelvinToRGB(cfg.temp);
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  grad.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
+  grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+
+  ctx.globalCompositeOperation = "screen";
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalCompositeOperation = "source-over";
+}
+
+function loop() {
+  if (!state.running) return;
+
+  if (video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    const result = poseLandmarker.detectForVideo(video, performance.now());
+    state.landmarks = (result.landmarks && result.landmarks[0]) || null;
+  }
+
+  const w = canvas.width, h = canvas.height;
+  ctx.save();
+  if (toggleMirror.checked) {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
+  ctx.drawImage(video, 0, 0, w, h);
+  ctx.restore();
+
+  const lm = state.landmarks;
+
+  if (lm) {
+    const chest = midpoint(lm[11], lm[12]);
+    const hip = midpoint(lm[23], lm[24]);
+    const mirrorX = x => (toggleMirror.checked ? (1 - x) : x);
+    const anchorX = mirrorX(chest.x) * w;
+    const anchorY = chest.y * h;
+
+    Object.entries(state.lights).forEach(([key, cfg]) => {
+      const vec3 = sphericalToVec3(cfg.azimuth, cfg.elevation, cfg.distance);
+      drawLightGlow(anchorX, anchorY, vec3, cfg);
+    });
+
+    if (toggleSkeleton.checked) {
+      ctx.save();
+      ctx.strokeStyle = "rgba(111,227,214,.85)";
+      ctx.fillStyle = "rgba(111,227,214,.95)";
+      ctx.lineWidth = 2;
+      BODY_CONNECTIONS.forEach(([a, b]) => {
+        const pa = lm[a], pb = lm[b];
+        if (!pa || !pb) return;
+        ctx.beginPath();
+        ctx.moveTo(mirrorX(pa.x) * w, pa.y * h);
+        ctx.lineTo(mirrorX(pb.x) * w, pb.y * h);
+        ctx.stroke();
+      });
+      BODY_POINT_INDEXES.forEach(i => {
+        const p = lm[i];
+        if (!p) return;
+        ctx.beginPath();
+        ctx.arc(mirrorX(p.x) * w, p.y * h, 4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    bodyGroup.visible = true;
+    placeholderMannequin.visible = false;
+    BODY_POINT_INDEXES.forEach(i => {
+      const p = lm[i];
+      const mesh = bodyPointMeshes[i];
+      mesh.visible = true;
+      mesh.position.set((p.x - hip.x) * -2, -(p.y - hip.y) * 2, -(p.z - hip.z) * 2);
+    });
+    BODY_CONNECTIONS.forEach(([a, b], idx) => {
+      const line = boneLines[idx];
+      line.visible = true;
+      const pos = line.geometry.attributes.position;
+      const ma = bodyPointMeshes[a].position, mb = bodyPointMeshes[b].position;
+      pos.setXYZ(0, ma.x, ma.y, ma.z);
+      pos.setXYZ(1, mb.x, mb.y, mb.z);
+      pos.needsUpdate = true;
+    });
+  } else {
+    placeholderMannequin.visible = true;
+  }
+
+  Object.entries(state.lights).forEach(([key, cfg]) => {
+    const vec3 = sphericalToVec3(cfg.azimuth, cfg.elevation, cfg.distance);
+    const gizmo = lightGizmos[key];
+    gizmo.position.copy(vec3);
+    gizmo.lookAt(0, 0, 0);
+    const scale = 0.6 + (cfg.intensity / 100) * 0.7;
+    gizmo.scale.setScalar(scale);
+    gizmo.material.color.setHex(cfg.color);
+    gizmo.children[0].material.color.setHex(cfg.color);
+  });
+
+  orbit.update();
+  threeRenderer.render(threeScene, threeCamera);
+
+  requestAnimationFrame(loop);
+}
+</script>
+
+</body>
+</html>
