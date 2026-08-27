@@ -252,8 +252,8 @@
     <div class="stage-label">CÂMERA — RELIGHT AO VIVO</div>
     <canvas id="relightCanvas" width="960" height="720"></canvas>
     <div class="status" id="statusBox">
-      Ferramenta interna de teste: usa sua câmera para detectar seu corpo e
-      simular 3 luzes de estúdio posicionadas em um espaço 3D.
+      Ferramenta interna de teste: usa sua câmera para detectar seu rosto e
+      simular 3 luzes de estúdio (bolas de luz flutuantes) posicionadas em um espaço 3D.
       <br><br>
       <button id="startBtn">Ativar câmera</button>
     </div>
@@ -297,15 +297,15 @@
       </div>
 
       <div class="global-group">
-        <label><input type="checkbox" id="toggleSkeleton"> Mostrar esqueleto detectado</label>
+        <label><input type="checkbox" id="toggleSkeleton"> Mostrar malha do rosto detectada</label>
         <label><input type="checkbox" id="toggleMirror" checked> Espelhar imagem</label>
       </div>
 
       <div class="footer-note">
-        Protótipo interno (uso de teste). Rastreamento de corpo via MediaPipe Pose
+        Protótipo interno (uso de teste). Rastreamento de rosto via MediaPipe Face
         Landmarker rodando localmente no navegador — nenhum vídeo é enviado a servidor
         algum. A iluminação é uma aproximação visual (relight 2D projetado a partir de
-        um vetor 3D real), não um render fisicamente exato.
+        um vetor 3D real, com base na orientação do rosto), não um render fisicamente exato.
       </div>
 
     </div>
@@ -327,7 +327,7 @@
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { PoseLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const LIGHT_DEFAULTS = {
   key:  { azimuth: 40,  elevation: 22, distance: 0.9, intensity: 82, temp: 4400 },
@@ -403,56 +403,54 @@ const floorGrid = new THREE.GridHelper(3, 12, 0x2a3a3d, 0x1a2528);
 floorGrid.position.y = -0.95;
 threeScene.add(floorGrid);
 
-const bodyGroup = new THREE.Group();
-threeScene.add(bodyGroup);
+const faceGroup = new THREE.Group();
+threeScene.add(faceGroup);
 
-const BODY_POINT_INDEXES = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
-const BODY_CONNECTIONS = [
-  [0, 11], [0, 12], [11, 12],
-  [11, 13], [13, 15], [12, 14], [14, 16],
-  [11, 23], [12, 24], [23, 24],
-  [23, 25], [25, 27], [24, 26], [26, 28],
+// Subconjunto pequeno e confiavel da topologia do MediaPipe Face Landmarker
+// (indices amplamente documentados: testa, temporas, nariz, queixo, olhos, boca).
+const FACE_POINT_INDEXES = [10, 234, 454, 1, 152, 61, 291, 33, 263];
+const FACE_CONNECTIONS = [
+  [10, 234], [10, 454], [234, 152], [454, 152],
+  [234, 33], [454, 263], [33, 1], [263, 1],
+  [1, 61], [1, 291], [61, 291], [33, 10], [263, 10],
 ];
 
-const bodyPointMeshes = {};
-const bodyPointGeo = new THREE.SphereGeometry(0.028, 10, 10);
-const bodyPointMat = new THREE.MeshBasicMaterial({ color: 0x6fe3d6 });
-BODY_POINT_INDEXES.forEach(i => {
-  const m = new THREE.Mesh(bodyPointGeo, bodyPointMat);
+const facePointMeshes = {};
+const facePointGeo = new THREE.SphereGeometry(0.022, 10, 10);
+const facePointMat = new THREE.MeshBasicMaterial({ color: 0x6fe3d6 });
+FACE_POINT_INDEXES.forEach(i => {
+  const m = new THREE.Mesh(facePointGeo, facePointMat);
   m.visible = false;
-  bodyGroup.add(m);
-  bodyPointMeshes[i] = m;
+  faceGroup.add(m);
+  facePointMeshes[i] = m;
 });
 
-const boneLines = BODY_CONNECTIONS.map(() => {
+const faceLines = FACE_CONNECTIONS.map(() => {
   const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
   const mat = new THREE.LineBasicMaterial({ color: 0x2fa89c });
   const line = new THREE.Line(geo, mat);
   line.visible = false;
-  bodyGroup.add(line);
+  faceGroup.add(line);
   return line;
 });
 
-const placeholderMannequin = new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.32, 0.75, 4, 10),
+const placeholderHead = new THREE.Mesh(
+  new THREE.SphereGeometry(0.34, 20, 16),
   new THREE.MeshStandardMaterial({ color: 0x1c2a2d, roughness: 0.9 })
 );
-placeholderMannequin.position.y = 0;
-bodyGroup.add(placeholderMannequin);
+faceGroup.add(placeholderHead);
 
 const lightGizmos = {};
 Object.entries(state.lights).forEach(([key, cfg]) => {
   const gizmo = new THREE.Mesh(
-    new THREE.SphereGeometry(0.075, 16, 16),
+    new THREE.SphereGeometry(0.09, 20, 16),
     new THREE.MeshBasicMaterial({ color: cfg.color })
   );
-  const beam = new THREE.Mesh(
-    new THREE.ConeGeometry(0.05, 0.28, 12, 1, true),
-    new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.35, side: THREE.DoubleSide })
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 20, 16),
+    new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.25, side: THREE.BackSide })
   );
-  gizmo.add(beam);
-  beam.position.set(0, 0.16, 0);
-  beam.rotation.x = Math.PI;
+  gizmo.add(halo);
   threeScene.add(gizmo);
   lightGizmos[key] = gizmo;
 });
@@ -491,7 +489,7 @@ document.querySelectorAll(".light-group").forEach(group => {
 const toggleSkeleton = document.getElementById("toggleSkeleton");
 const toggleMirror = document.getElementById("toggleMirror");
 
-// --- MediaPipe Pose Landmarker -------------------------------------------
+// --- MediaPipe Face Landmarker -------------------------------------------
 
 const video = document.getElementById("webcam");
 const canvas = document.getElementById("relightCanvas");
@@ -500,39 +498,39 @@ const statusBox = document.getElementById("statusBox");
 const startBtn = document.getElementById("startBtn");
 const snapshotBtn = document.getElementById("snapshotBtn");
 
-let poseLandmarker = null;
+let faceLandmarker = null;
 let lastVideoTime = -1;
 
-async function initPoseLandmarker() {
+async function initFaceLandmarker() {
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
   );
   try {
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
         delegate: "GPU",
       },
       runningMode: "VIDEO",
-      numPoses: 1,
+      numFaces: 1,
     });
   } catch (e) {
-    poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
         delegate: "CPU",
       },
       runningMode: "VIDEO",
-      numPoses: 1,
+      numFaces: 1,
     });
   }
 }
 
 async function startCamera() {
   startBtn.disabled = true;
-  statusBox.innerHTML = "Carregando modelo de detecção de corpo...";
+  statusBox.innerHTML = "Carregando modelo de detecção de rosto...";
   try {
-    await initPoseLandmarker();
+    await initFaceLandmarker();
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: "user" },
       audio: false,
@@ -561,12 +559,27 @@ snapshotBtn.addEventListener("click", () => {
   a.click();
 });
 
-function midpoint(a, b) {
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 };
+function average(points) {
+  const n = points.length;
+  const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y, z: acc.z + p.z }), { x: 0, y: 0, z: 0 });
+  return { x: sum.x / n, y: sum.y / n, z: sum.z / n };
 }
 
-function drawLightGlow(anchorX, anchorY, vec3, cfg) {
-  const facing = THREE.MathUtils.clamp(0.2 + 0.8 * ((vec3.z / cfg.distance + 1) / 2), 0.12, 1);
+// Aproxima a normal do rosto (pra onde o rosto esta virado) a partir da
+// assimetria de profundidade (z) entre bochechas e entre testa/queixo.
+// Com o rosto neutro/de frente, normal = (0,0,1), o que reduz esse calculo
+// ao mesmo comportamento de "luz de frente = mais forte" usado antes.
+function estimateFaceNormal(lm) {
+  const rightCheek = lm[234], leftCheek = lm[454];
+  const forehead = lm[10], chin = lm[152];
+  const faceWidth = Math.hypot(leftCheek.x - rightCheek.x, leftCheek.y - rightCheek.y) || 0.001;
+  const yaw = THREE.MathUtils.clamp((leftCheek.z - rightCheek.z) / faceWidth * 2.2, -1, 1);
+  const pitch = THREE.MathUtils.clamp((chin.z - forehead.z) / faceWidth * 2.2, -1, 1);
+  const forward = Math.sqrt(Math.max(0, 1 - yaw * yaw - pitch * pitch));
+  return new THREE.Vector3(yaw, -pitch, forward);
+}
+
+function drawLightGlow(anchorX, anchorY, vec3, cfg, facing, orbRadius) {
   const distanceFalloff = 1 / (0.55 + cfg.distance * cfg.distance);
   const alpha = THREE.MathUtils.clamp((cfg.intensity / 100) * facing * distanceFalloff, 0, 1);
   if (alpha <= 0.01) return;
@@ -574,26 +587,27 @@ function drawLightGlow(anchorX, anchorY, vec3, cfg) {
   const screenScale = Math.min(canvas.width, canvas.height) * 0.55;
   const offsetX = vec3.x * screenScale;
   const offsetY = -vec3.y * screenScale;
-  const closeness = THREE.MathUtils.clamp((cfg.distance - 0.4) / 1.8, 0, 1);
-  const radius = THREE.MathUtils.lerp(canvas.width * 0.34, canvas.width * 0.14, closeness);
 
   const cx = anchorX + offsetX;
   const cy = anchorY + offsetY;
 
   const [r, g, b] = kelvinToRGB(cfg.temp);
-  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-  grad.addColorStop(0, `rgba(${r},${g},${b},${alpha})`);
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, orbRadius);
+  grad.addColorStop(0, `rgba(255,255,255,${alpha})`);
+  grad.addColorStop(0.55, `rgba(255,255,255,${alpha})`);
+  grad.addColorStop(0.7, `rgba(${r},${g},${b},${alpha})`);
+  grad.addColorStop(0.86, `rgba(${r},${g},${b},${alpha * 0.9})`);
   grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
 
   ctx.globalCompositeOperation = "screen";
   ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.arc(cx, cy, orbRadius, 0, Math.PI * 2);
   ctx.fill();
   ctx.globalCompositeOperation = "source-over";
 }
 
-let poseDetectionEnabled = true;
+let faceDetectionEnabled = true;
 
 function showLoopWarning(message) {
   const el = document.getElementById("loopWarning");
@@ -614,16 +628,16 @@ function loop() {
   ctx.drawImage(video, 0, 0, w, h);
   ctx.restore();
 
-  if (poseDetectionEnabled && video.currentTime !== lastVideoTime) {
+  if (faceDetectionEnabled && video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
     try {
-      const result = poseLandmarker.detectForVideo(video, performance.now());
-      state.landmarks = (result.landmarks && result.landmarks[0]) || null;
+      const result = faceLandmarker.detectForVideo(video, performance.now());
+      state.landmarks = (result.faceLandmarks && result.faceLandmarks[0]) || null;
     } catch (err) {
-      console.error("Falha na detecção de pose, desativando tracking:", err);
-      poseDetectionEnabled = false;
+      console.error("Falha na detecção de rosto, desativando tracking:", err);
+      faceDetectionEnabled = false;
       state.landmarks = null;
-      showLoopWarning("Rastreamento de corpo falhou neste navegador (a câmera continua funcionando, mas sem luz automática). Detalhe: " + (err && err.message ? err.message : err));
+      showLoopWarning("Rastreamento de rosto falhou neste navegador (a câmera continua funcionando, mas sem luz automática). Detalhe: " + (err && err.message ? err.message : err));
     }
   }
 
@@ -631,15 +645,19 @@ function loop() {
   const lm = state.landmarks;
 
   if (lm) {
-    const chest = midpoint(lm[11], lm[12]);
-    const hip = midpoint(lm[23], lm[24]);
+    const center = average([lm[10], lm[152], lm[234], lm[454]]);
+    const normal = estimateFaceNormal(lm);
     const mirrorX = x => (toggleMirror.checked ? (1 - x) : x);
-    const anchorX = mirrorX(chest.x) * w;
-    const anchorY = chest.y * h;
+    const anchorX = mirrorX(center.x) * w;
+    const anchorY = center.y * h;
+    const faceWidthPx = Math.hypot(lm[454].x - lm[234].x, lm[454].y - lm[234].y) * w;
+    const orbRadius = THREE.MathUtils.clamp(faceWidthPx * 0.85, 40, canvas.width * 0.5);
 
     Object.entries(state.lights).forEach(([key, cfg]) => {
       const vec3 = sphericalToVec3(cfg.azimuth, cfg.elevation, cfg.distance);
-      drawLightGlow(anchorX, anchorY, vec3, cfg);
+      const lightDir = vec3.clone().normalize();
+      const facing = THREE.MathUtils.clamp(0.15 + 0.85 * ((normal.dot(lightDir) + 1) / 2), 0.08, 1);
+      drawLightGlow(anchorX, anchorY, vec3, cfg, facing, orbRadius);
     });
 
     if (toggleSkeleton.checked) {
@@ -647,7 +665,7 @@ function loop() {
       ctx.strokeStyle = "rgba(111,227,214,.85)";
       ctx.fillStyle = "rgba(111,227,214,.95)";
       ctx.lineWidth = 2;
-      BODY_CONNECTIONS.forEach(([a, b]) => {
+      FACE_CONNECTIONS.forEach(([a, b]) => {
         const pa = lm[a], pb = lm[b];
         if (!pa || !pb) return;
         ctx.beginPath();
@@ -655,7 +673,7 @@ function loop() {
         ctx.lineTo(mirrorX(pb.x) * w, pb.y * h);
         ctx.stroke();
       });
-      BODY_POINT_INDEXES.forEach(i => {
+      FACE_POINT_INDEXES.forEach(i => {
         const p = lm[i];
         if (!p) return;
         ctx.beginPath();
@@ -665,25 +683,25 @@ function loop() {
       ctx.restore();
     }
 
-    bodyGroup.visible = true;
-    placeholderMannequin.visible = false;
-    BODY_POINT_INDEXES.forEach(i => {
+    faceGroup.visible = true;
+    placeholderHead.visible = false;
+    FACE_POINT_INDEXES.forEach(i => {
       const p = lm[i];
-      const mesh = bodyPointMeshes[i];
+      const mesh = facePointMeshes[i];
       mesh.visible = true;
-      mesh.position.set((p.x - hip.x) * -2, -(p.y - hip.y) * 2, -(p.z - hip.z) * 2);
+      mesh.position.set((p.x - center.x) * -6, -(p.y - center.y) * 6, -(p.z - center.z) * 6);
     });
-    BODY_CONNECTIONS.forEach(([a, b], idx) => {
-      const line = boneLines[idx];
+    FACE_CONNECTIONS.forEach(([a, b], idx) => {
+      const line = faceLines[idx];
       line.visible = true;
       const pos = line.geometry.attributes.position;
-      const ma = bodyPointMeshes[a].position, mb = bodyPointMeshes[b].position;
+      const ma = facePointMeshes[a].position, mb = facePointMeshes[b].position;
       pos.setXYZ(0, ma.x, ma.y, ma.z);
       pos.setXYZ(1, mb.x, mb.y, mb.z);
       pos.needsUpdate = true;
     });
   } else {
-    placeholderMannequin.visible = true;
+    placeholderHead.visible = true;
   }
 
   Object.entries(state.lights).forEach(([key, cfg]) => {
